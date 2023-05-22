@@ -1,0 +1,167 @@
+---
+- hosts: all
+  become: yes
+
+  vars:
+    - user_name: user
+    - user_password: password
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Base tools
+      apt:
+        pkg:
+          - git
+          - python3
+          - vim
+          - curl
+        state: latest
+
+    - name: Base
+      apt:
+        pkg:
+          - build-essential
+          - openjdk-11-jdk
+          - binutils
+          - llvm
+          - tk-dev
+          - sqlite3
+          - zlib1g-dev
+          - libssl-dev
+          - libncurses5-dev
+          - libreadline-dev
+          - libbz2-dev
+          - xz-utils
+          - libncursesw5-dev
+          - liblzma-dev
+          - libxml2-dev
+          - libffi-dev
+          - libxmlsec1-dev
+          - net-tools
+          - libbz2-dev
+          - libsqlite3-dev
+          - libtinfo5
+        state: latest
+      register: result
+
+    - name: VHDL development
+      apt:
+        pkg:
+          - ghdl
+          - gtkwave
+          - yosys
+        state: latest
+
+    - name: Snap refresh
+      ansible.builtin.systemd:
+        state: restarted
+        name: snapd
+      when: result is changed
+
+    - name: Desktop
+      apt:
+        pkg:
+          - ubuntu-desktop
+          - firefox
+        state: latest
+
+    - name: VBox Guest Additions ISO
+      apt:
+        pkg: virtualbox-guest-additions-iso
+        state: latest
+      when: result is changed
+
+    - name: VBox Guest Additions dir
+      file:
+        path: /mnt/guest-additions
+        state: directory
+      when: result is changed
+
+    - name: VBox Guest Additions mount
+      mount:
+        src: /usr/share/virtualbox/VBoxGuestAdditions.iso
+        path: /mnt/guest-additions
+        state: mounted
+        fstype: iso9660
+        opts: ro
+      when: result is changed
+
+    - name: VBox Guest Additions script
+      command: /mnt/guest-additions/VBoxLinuxAdditions.run
+      register: ret
+      args:
+        chdir: /mnt/guest-additions
+      failed_when: ret.rc != 0 and ret.rc != 2
+      when: result is changed
+
+    - name: VBox Guest Additions unmount
+      mount:
+        src: /usr/share/virtualbox/VBoxGuestAdditions.iso
+        path: /mnt/guest-additions
+        state: absent
+      when: result is changed
+
+    - name: VBox Guest Additions remove
+      file:
+        path: /mnt/guest-additions
+        state: absent
+      when: result is changed
+
+    - name: VBox Guest Additions remove ISO
+      apt:
+        pkg: virtualbox-guest-additions-iso
+        state: absent
+      when: result is changed
+
+    - name: Reboot
+      reboot:
+      when: result is changed
+
+    - name: Add group
+      group:
+        name: '{{ user_name }}'
+        state: present
+
+    - name: Add user
+      ansible.builtin.user:
+        name: '{{ user_name }}'
+        groups: '{{ user_name }}', sudo, vboxsf
+        createhome: yes
+        home: '/home/{{ user_name }}'
+        shell: /bin/bash
+        password: '{{ user_password | password_hash("sha512") }}'
+        group: '{{ user_name }}'
+
+    - name: Install IntelliJ Idea
+      snap:
+        # change to intellij-idea-community if you don't have a license
+        name: intellij-idea-ultimate
+        channel: 2022.2/stable
+        classic: yes
+
+    - name: Install Postman
+      community.general.snap:
+        name: postman
+
+    - name: copy Microsoft key
+      get_url:
+        url: 'https://packages.microsoft.com/keys/microsoft.asc'
+        dest: '/etc/apt/keyrings/'
+        mode: 'u=rw,go=r'
+
+    - name: Install Microsoft repo
+      apt_repository:
+        repo: >-
+          deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/microsoft.asc]
+              https://packages.microsoft.com/repos/code stable main
+        filename: vscode
+        state: present
+
+    - name: Install VS Code
+      apt:
+        pkg:
+          - code
+        state: latest
